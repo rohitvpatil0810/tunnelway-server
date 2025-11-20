@@ -29,22 +29,6 @@ func RegisterAgent(w http.ResponseWriter, r *http.Request, manager *tunnel.Manag
 		log.Error(err.Error())
 		return
 	}
-	defer conn.Close()
 
-	slug := manager.RegisterConnection(conn)
-
-	conn.WriteJSON(slug)
-
-	for {
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			log.Error(err.Error())
-			break
-		}
-
-		if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-			log.Error(err.Error())
-			break
-		}
-	}
+	manager.RegisterConnection(conn)
 }

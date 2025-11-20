@@ -9,6 +9,6 @@ import (
 
 func RegisterRoutes(r *chi.Mux, m *tunnel.Manager) {
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "unknown tunnel", http.StatusNotFound)
+		m.HandlePublicTunnelRequest(w, r)
 	})
 }
