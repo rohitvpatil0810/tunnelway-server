@@ -26,13 +26,13 @@ func NewManager() *Manager {
 }
 
 func (m *Manager) RegisterConnection(conn *websocket.Conn) string {
-	var session = &Session{conn}
 	slug, err := m.generateSlug()
 	if err != nil {
 		log.Error(err.Error())
 		conn.WriteMessage(websocket.TextMessage, []byte("Failed to register"))
 		conn.Close()
 	}
+	var session = NewSession(slug, conn)
 	m.tunnels[slug] = session
 	return slug
 }
