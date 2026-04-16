@@ -35,7 +35,7 @@ func (m *Manager) RegisterConnection(conn *websocket.Conn) string {
 	slug, err := m.generateSlug()
 	if err != nil {
 		log.Error(err.Error())
-		conn.WriteMessage(websocket.TextMessage, []byte("Failed to register"))
+		conn.WriteMessage(websocket.CloseMessage, []byte("Failed to register"))
 		conn.Close()
 	}
 	var session = NewSession(slug, conn)
@@ -113,11 +113,13 @@ func (m *Manager) HandlePublicTunnelRequest(w http.ResponseWriter, r *http.Reque
 
 	select {
 	case resp := <-respChan:
-		// for now just send whatever is received in form of TunnelResponse
-		// TODO: convert TunnelResponse to
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(resp)
+		for key, values := range resp.Headers {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(resp.Status)
+		w.Write([]byte(resp.Body))
 
 	case <-session.Closed:
 		http.Error(w, "Tunnel closed Unexpectedly", http.StatusInternalServerError)

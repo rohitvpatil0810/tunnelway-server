@@ -53,7 +53,7 @@ func NewSession(slug string, conn *websocket.Conn) *Session {
 		LastSeen: time.Now(),
 		Closed:   make(chan struct{}),
 	}
-	conn.WriteJSON(session.Subdomain)
+	conn.WriteJSON(map[string]string{"subdomain": session.Subdomain})
 	return session
 }
 

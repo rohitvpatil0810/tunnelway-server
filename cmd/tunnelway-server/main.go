@@ -24,7 +24,7 @@ func main() {
 
 	fmt.Println("Starting Tunnelway Server...")
 
-	err := http.ListenAndServe("localhost:8080", r)
+	err := http.ListenAndServe("localhost:6000", r)
 
 	if err != nil {
 		log.Error(err.Error())
