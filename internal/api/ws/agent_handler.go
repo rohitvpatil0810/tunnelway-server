@@ -23,6 +23,11 @@ func RegisterAgent(w http.ResponseWriter, r *http.Request, manager *tunnel.Manag
 		return
 	}
 
+	agentID := r.URL.Query().Get("agent_id")
+	if agentID != "" {
+		log.Info("Agent reconnection attempt", "agent_id", agentID)
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 
 	if err != nil {
@@ -30,5 +35,5 @@ func RegisterAgent(w http.ResponseWriter, r *http.Request, manager *tunnel.Manag
 		return
 	}
 
-	manager.RegisterConnection(conn)
+	manager.RegisterConnection(conn, agentID)
 }

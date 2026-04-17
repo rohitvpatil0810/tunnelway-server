@@ -18,6 +18,8 @@ func main() {
 
 	httprouter.RegisterRoutes(r, manager)
 
+	// Websocket endpoint for agents to connect
+	// also takes an optional query param identify the agent reconnection - ?agent_id=xyze
 	r.HandleFunc("/_ws/agent", func(w http.ResponseWriter, r *http.Request) {
 		ws.RegisterAgent(w, r, manager)
 	})

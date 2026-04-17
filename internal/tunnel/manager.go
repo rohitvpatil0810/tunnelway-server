@@ -31,7 +31,21 @@ func NewManager() *Manager {
 	return manager
 }
 
-func (m *Manager) RegisterConnection(conn *websocket.Conn) string {
+func (m *Manager) RegisterConnection(conn *websocket.Conn, agentID string) {
+	// check if agentID is not empty, if yes then its a reconnection attempt, try to find the session and update the connection
+	if agentID != "" {
+		session := m.tunnels[agentID]
+		if session != nil {
+			log.Info("Found existing session for agentID, updating connection", "agent_id", agentID)
+			session.conn = conn
+			session.LastSeen = time.Now()
+			go session.StartWriteLoop()
+			go session.StartReadLoop()
+
+			conn.WriteJSON(map[string]string{"reconnected": "true", "subdomain": session.Subdomain})
+		}
+	}
+
 	slug, err := m.generateSlug()
 	if err != nil {
 		log.Error(err.Error())
@@ -44,7 +58,7 @@ func (m *Manager) RegisterConnection(conn *websocket.Conn) string {
 
 	m.tunnels[slug] = session
 
-	return slug
+	log.Info("New agent connected", "subdomain", session.Subdomain)
 }
 
 func (m *Manager) generateSlug() (string, error) {
