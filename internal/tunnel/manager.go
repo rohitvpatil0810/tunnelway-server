@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,7 +17,8 @@ import (
 const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 type Manager struct {
-	tunnels map[string]*Session
+	tunnels   map[string]*Session
+	tunnelsMu sync.RWMutex
 }
 
 var manager *Manager
@@ -33,30 +35,39 @@ func NewManager() *Manager {
 
 func (m *Manager) RegisterConnection(conn *websocket.Conn, agentID string) {
 	// check if agentID is not empty, if yes then its a reconnection attempt, try to find the session and update the connection
+	// if session not found create session with same agentId as slug, this will allow users to specify their own subdomain by setting agentID to desired subdomain,
+	// if agentID is empty then generate random slug as before
 	if agentID != "" {
+		m.tunnelsMu.RLock()
 		session := m.tunnels[agentID]
+		m.tunnelsMu.RUnlock()
 		if session != nil {
 			log.Info("Found existing session for agentID, updating connection", "agent_id", agentID)
-			session.conn = conn
-			session.LastSeen = time.Now()
-			go session.StartWriteLoop()
-			go session.StartReadLoop()
+			session.Reconnect(conn)
 
 			conn.WriteJSON(map[string]string{"reconnected": "true", "subdomain": session.Subdomain})
+			return
 		}
 	}
 
-	slug, err := m.generateSlug()
-	if err != nil {
-		log.Error(err.Error())
-		conn.WriteMessage(websocket.CloseMessage, []byte("Failed to register"))
-		conn.Close()
+	var slug string
+	var err error
+	if agentID == "" {
+		slug, err = m.generateSlug()
+		if err != nil {
+			log.Error(err.Error())
+			conn.WriteMessage(websocket.CloseMessage, []byte("Failed to register"))
+			conn.Close()
+			return
+		}
+	} else {
+		slug = agentID
 	}
 	var session = NewSession(slug, conn)
-	go session.StartWriteLoop()
-	go session.StartReadLoop()
 
+	m.tunnelsMu.Lock()
 	m.tunnels[slug] = session
+	m.tunnelsMu.Unlock()
 
 	log.Info("New agent connected", "subdomain", session.Subdomain)
 }
@@ -94,7 +105,9 @@ func (m *Manager) HandlePublicTunnelRequest(w http.ResponseWriter, r *http.Reque
 	requestHost := r.Host
 	slug := strings.Split(requestHost, ".")[0]
 
+	m.tunnelsMu.RLock()
 	session, exists := m.tunnels[slug]
+	m.tunnelsMu.RUnlock()
 	if !exists {
 		http.Error(w, "Tunnel is not connected.", http.StatusNotFound)
 		return
@@ -123,7 +136,11 @@ func (m *Manager) HandlePublicTunnelRequest(w http.ResponseWriter, r *http.Reque
 		Body:    bodyBytes,
 	}
 	sendReqMsg, _ := json.Marshal(tunnelRequest)
-	session.Send <- sendReqMsg
+	closed, err := session.SendToAgent(sendReqMsg)
+	if err != nil {
+		http.Error(w, "Tunnel closed Unexpectedly", http.StatusInternalServerError)
+		return
+	}
 
 	select {
 	case resp := <-respChan:
@@ -135,7 +152,7 @@ func (m *Manager) HandlePublicTunnelRequest(w http.ResponseWriter, r *http.Reque
 		w.WriteHeader(resp.Status)
 		w.Write([]byte(resp.Body))
 
-	case <-session.Closed:
+	case <-closed:
 		http.Error(w, "Tunnel closed Unexpectedly", http.StatusInternalServerError)
 
 	case <-time.After(time.Duration(30 * time.Second)):

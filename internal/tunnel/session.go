@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -13,16 +14,22 @@ import (
 type Session struct {
 	ID        string
 	Subdomain string
-	conn      *websocket.Conn
-
-	Send chan []byte
 
 	PendingMu sync.Mutex
 	Pending   map[string]chan *TunnelResponse
 
 	LastSeen time.Time
 
-	Closed chan struct{}
+	stateMu sync.RWMutex
+	state   *connectionState
+}
+
+type connectionState struct {
+	conn      *websocket.Conn
+	send      chan []byte
+	closed    chan struct{}
+	stop      chan struct{}
+	closeOnce sync.Once
 }
 
 type TunnelResponse struct {
@@ -46,22 +53,83 @@ func NewSession(slug string, conn *websocket.Conn) *Session {
 	session := &Session{
 		ID:        "agent-" + slug,
 		Subdomain: slug + ".localtest.me",
-		conn:      conn,
-		// make buffer of 128, to allow up to 128 messages to b queued without blocking the sender
-		Send:     make(chan []byte, 128),
-		Pending:  make(map[string]chan *TunnelResponse),
-		LastSeen: time.Now(),
-		Closed:   make(chan struct{}),
+		Pending:   make(map[string]chan *TunnelResponse),
+		LastSeen:  time.Now(),
 	}
+
+	state := &connectionState{
+		conn:   conn,
+		send:   make(chan []byte, 128),
+		closed: make(chan struct{}),
+		stop:   make(chan struct{}),
+	}
+	session.state = state
+
 	conn.WriteJSON(map[string]string{"subdomain": session.Subdomain})
+	go session.StartWriteLoop(state)
+	go session.StartReadLoop(state)
+
 	return session
 }
 
-func (session *Session) StartReadLoop() {
-	defer close(session.Closed)
+func (session *Session) currentState() *connectionState {
+	session.stateMu.RLock()
+	defer session.stateMu.RUnlock()
+	return session.state
+}
+
+func (session *Session) setState(state *connectionState) {
+	session.stateMu.Lock()
+	session.state = state
+	session.stateMu.Unlock()
+}
+
+func (session *Session) signalClosed(state *connectionState) {
+	state.closeOnce.Do(func() {
+		close(state.stop)
+		close(state.closed)
+		_ = state.conn.Close()
+	})
+}
+
+func (session *Session) Reconnect(conn *websocket.Conn) {
+	previous := session.currentState()
+	if previous != nil {
+		session.signalClosed(previous)
+	}
+
+	newState := &connectionState{
+		conn:   conn,
+		send:   make(chan []byte, 128),
+		closed: make(chan struct{}),
+		stop:   make(chan struct{}),
+	}
+	session.setState(newState)
+	session.LastSeen = time.Now()
+
+	go session.StartWriteLoop(newState)
+	go session.StartReadLoop(newState)
+}
+
+func (session *Session) SendToAgent(msg []byte) (<-chan struct{}, error) {
+	state := session.currentState()
+	if state == nil {
+		return nil, errors.New("session has no active connection")
+	}
+
+	select {
+	case <-state.closed:
+		return nil, errors.New("session connection is closed")
+	case state.send <- msg:
+		return state.closed, nil
+	}
+}
+
+func (session *Session) StartReadLoop(state *connectionState) {
+	defer session.signalClosed(state)
 
 	for {
-		_, msg, err := session.conn.ReadMessage()
+		_, msg, err := state.conn.ReadMessage()
 		if err != nil {
 			log.Error(err.Error())
 			return
@@ -88,11 +156,18 @@ func (session *Session) StartReadLoop() {
 	}
 }
 
-func (session *Session) StartWriteLoop() {
-	for msg := range session.Send {
-		if err := session.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-			log.Error("write error", slog.String("error", err.Error()))
+func (session *Session) StartWriteLoop(state *connectionState) {
+	defer session.signalClosed(state)
+
+	for {
+		select {
+		case <-state.stop:
 			return
+		case msg := <-state.send:
+			if err := state.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				log.Error("write error", slog.String("error", err.Error()))
+				return
+			}
 		}
 	}
 }
