@@ -36,9 +36,7 @@ type TunnelResponse struct {
 	ID      string
 	Status  int
 	Headers http.Header
-	// Body    []byte `json:"Body"`
-	// TODO: change to byte again - for testing changed to string
-	Body string `json:"Body"`
+	Body    []byte `json:"Body"`
 }
 
 type TunnelRequest struct {
@@ -49,10 +47,10 @@ type TunnelRequest struct {
 	Body    []byte
 }
 
-func NewSession(slug string, conn *websocket.Conn) *Session {
+func NewSession(slug string, mainDomain string, conn *websocket.Conn) *Session {
 	session := &Session{
 		ID:        "agent-" + slug,
-		Subdomain: slug + ".localtest.me",
+		Subdomain: slug + "." + mainDomain,
 		Pending:   make(map[string]chan *TunnelResponse),
 		LastSeen:  time.Now(),
 	}

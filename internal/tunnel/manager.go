@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -17,19 +18,28 @@ import (
 const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 type Manager struct {
-	tunnels   map[string]*Session
-	tunnelsMu sync.RWMutex
+	tunnels    map[string]*Session
+	tunnelsMu  sync.RWMutex
+	mainDomain string
 }
 
 var manager *Manager
 var log = logger.Logger()
 
-func NewManager() *Manager {
+func NewManager(mainDomain string) *Manager {
+	if strings.TrimSpace(mainDomain) == "" {
+		mainDomain = "localtest.me"
+	}
+
 	if manager == nil {
 		manager = &Manager{
-			tunnels: make(map[string]*Session),
+			tunnels:    make(map[string]*Session),
+			mainDomain: mainDomain,
 		}
+	} else {
+		manager.mainDomain = mainDomain
 	}
+
 	return manager
 }
 
@@ -63,7 +73,7 @@ func (m *Manager) RegisterConnection(conn *websocket.Conn, agentID string) {
 	} else {
 		slug = agentID
 	}
-	var session = NewSession(slug, conn)
+	var session = NewSession(slug, m.mainDomain, conn)
 
 	m.tunnelsMu.Lock()
 	m.tunnels[slug] = session
@@ -103,7 +113,14 @@ func generateRandomString(length int) (string, error) {
 
 func (m *Manager) HandlePublicTunnelRequest(w http.ResponseWriter, r *http.Request) {
 	requestHost := r.Host
+	if host, _, err := net.SplitHostPort(r.Host); err == nil {
+		requestHost = host
+	}
+
 	slug := strings.Split(requestHost, ".")[0]
+	if suffix := "." + m.mainDomain; strings.HasSuffix(requestHost, suffix) {
+		slug = strings.TrimSuffix(requestHost, suffix)
+	}
 
 	m.tunnelsMu.RLock()
 	session, exists := m.tunnels[slug]

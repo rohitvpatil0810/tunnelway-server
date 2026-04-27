@@ -7,14 +7,16 @@ import (
 	"github.com/go-chi/chi"
 	httprouter "github.com/rohitvpatil0810/tunnelway-server/internal/api/http-router"
 	"github.com/rohitvpatil0810/tunnelway-server/internal/api/ws"
+	"github.com/rohitvpatil0810/tunnelway-server/internal/config"
 	"github.com/rohitvpatil0810/tunnelway-server/internal/tunnel"
 	"github.com/rohitvpatil0810/tunnelway-server/pkg/logger"
 )
 
 func main() {
 	var log = logger.Logger()
+	cfg := config.Load()
 	var r *chi.Mux = chi.NewRouter()
-	manager := tunnel.NewManager()
+	manager := tunnel.NewManager(cfg.MainDomain)
 
 	httprouter.RegisterRoutes(r, manager)
 
@@ -26,7 +28,7 @@ func main() {
 
 	fmt.Println("Starting Tunnelway Server...")
 
-	err := http.ListenAndServe("localhost:6000", r)
+	err := http.ListenAndServe(cfg.ListenAddr, r)
 
 	if err != nil {
 		log.Error(err.Error())
