@@ -1,0 +1,24 @@
+# VCS
+.git
+.gitignore
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Build artifacts and temp files
+bin/
+dist/
+out/
+*.log
+*.tmp
+*.swp
+
+# IDE/editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

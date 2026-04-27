@@ -9,7 +9,7 @@ import (
 
 const (
 	defaultMainDomain = "localtest.me:6000"
-	defaultListenAddr = "localhost:6000"
+	defaultListenAddr = "0.0.0.0:6000"
 )
 
 type Config struct {
