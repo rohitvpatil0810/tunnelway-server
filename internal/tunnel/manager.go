@@ -171,7 +171,7 @@ func (m *Manager) HandlePublicTunnelRequest(w http.ResponseWriter, r *http.Reque
 	case <-r.Context().Done():
 		return
 
-	case <-session.state.closed:
+	case <-session.currentState().closed:
 		http.Error(w, "Tunnel closed Unexpectedly", http.StatusInternalServerError)
 		return
 
