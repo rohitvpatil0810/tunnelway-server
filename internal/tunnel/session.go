@@ -270,7 +270,7 @@ func decodeFrame(data []byte) (*Frame, error) {
 	}, nil
 }
 
-func (session *Session) handleFrame(frame *Frame) {
+func (session *Session) handleResponseFrame(frame *Frame) {
 	switch frame.Type {
 	case FrameResponseStart:
 		var meta struct {
@@ -293,7 +293,7 @@ func (session *Session) handleFrame(frame *Frame) {
 				Headers:    meta.Headers,
 			}
 		} else {
-			log.Error("Received response start for unknown request ID", slog.String("requestID", frame.RequestID))
+			log.Debug("Received response start for unknown request ID", slog.String("requestID", frame.RequestID))
 		}
 
 	case FrameResponseBodyChunk:
@@ -307,7 +307,7 @@ func (session *Session) handleFrame(frame *Frame) {
 				log.Error("Failed to write response body chunk", slog.String("error", err.Error()))
 			}
 		} else {
-			log.Error("Received response body chunk for unknown request ID", slog.String("requestID", frame.RequestID))
+			log.Debug("Received response body chunk for unknown request ID", slog.String("requestID", frame.RequestID))
 		}
 
 	case FrameResponseBodyEnd:
@@ -316,7 +316,7 @@ func (session *Session) handleFrame(frame *Frame) {
 		if exists {
 			delete(session.Pending, frame.RequestID)
 		} else {
-			log.Error("Received response body end for unknown request ID", slog.String("requestID", frame.RequestID))
+			log.Debug("Received response body end for unknown request ID", slog.String("requestID", frame.RequestID))
 		}
 		session.PendingMu.Unlock()
 
@@ -344,6 +344,6 @@ func (session *Session) StartReadLoop(state *connectionState) {
 			continue
 		}
 
-		session.handleFrame(frame)
+		session.handleResponseFrame(frame)
 	}
 }
