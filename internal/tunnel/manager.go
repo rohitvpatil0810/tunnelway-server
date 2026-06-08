@@ -139,12 +139,24 @@ func (m *Manager) HandlePublicTunnelRequest(w http.ResponseWriter, r *http.Reque
 		PipeReader:    pr,
 		PipeWriter:    pw,
 	}
-
 	session.PendingMu.Lock()
 	session.Pending[requestId] = responseStream
 	session.PendingMu.Unlock()
 
 	go session.StreamRequestToAgent(r, requestId)
+
+	defer func() {
+		session.PendingMu.Lock()
+		responseStream, exists := session.Pending[requestId]
+		if exists {
+			delete(session.Pending, requestId)
+		}
+		session.PendingMu.Unlock()
+
+		if exists {
+			responseStream.PipeWriter.Close()
+		}
+	}()
 
 	select {
 	case responseStart := <-responseStream.responseStart:
@@ -156,10 +168,15 @@ func (m *Manager) HandlePublicTunnelRequest(w http.ResponseWriter, r *http.Reque
 		w.WriteHeader(responseStart.StatusCode)
 		io.Copy(w, responseStream.PipeReader)
 
+	case <-r.Context().Done():
+		return
+
 	case <-session.state.closed:
 		http.Error(w, "Tunnel closed Unexpectedly", http.StatusInternalServerError)
+		return
 
 	case <-time.After(time.Duration(30 * time.Second)):
 		http.Error(w, "Timeout.", http.StatusRequestTimeout)
+		return
 	}
 }
