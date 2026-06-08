@@ -143,7 +143,11 @@ func (m *Manager) HandlePublicTunnelRequest(w http.ResponseWriter, r *http.Reque
 	session.Pending[requestId] = responseStream
 	session.PendingMu.Unlock()
 
-	go session.StreamRequestToAgent(r, requestId)
+	errCh := make(chan error, 1)
+
+	go func() {
+		errCh <- session.StreamRequestToAgent(r, requestId)
+	}()
 
 	defer func() {
 		session.PendingMu.Lock()
@@ -169,6 +173,11 @@ func (m *Manager) HandlePublicTunnelRequest(w http.ResponseWriter, r *http.Reque
 		io.Copy(w, responseStream.PipeReader)
 
 	case <-r.Context().Done():
+		return
+
+	case err := <-errCh:
+		log.Error("Error streaming request to agent", "error", err)
+		http.Error(w, "Error processing request.", http.StatusInternalServerError)
 		return
 
 	case <-session.currentState().closed:
