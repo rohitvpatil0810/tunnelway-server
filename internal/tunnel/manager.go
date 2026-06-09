@@ -2,7 +2,6 @@ package tunnel
 
 import (
 	"crypto/rand"
-	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -130,49 +129,65 @@ func (m *Manager) HandlePublicTunnelRequest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// read body bytes
-	bodyBytes, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "Failed to ready body", http.StatusBadRequest)
-		return
-	}
-	r.Body.Close()
-
 	requestId := uuid.New().String()
-	var respChan chan *TunnelResponse = make(chan *TunnelResponse, 1)
+
+	pr, pw := io.Pipe()
+
+	// Register Response Stream
+	responseStream := &ResponseStream{
+		responseStart: make(chan ResponseStart, 1),
+		PipeReader:    pr,
+		PipeWriter:    pw,
+	}
 	session.PendingMu.Lock()
-	session.Pending[requestId] = respChan
+	session.Pending[requestId] = responseStream
 	session.PendingMu.Unlock()
 
-	// send request to the send channel
-	tunnelRequest := TunnelRequest{
-		ID:      requestId,
-		Method:  r.Method,
-		Path:    r.URL.Path,
-		Headers: r.Header,
-		Body:    bodyBytes,
-	}
-	sendReqMsg, _ := json.Marshal(tunnelRequest)
-	closed, err := session.SendToAgent(sendReqMsg)
-	if err != nil {
-		http.Error(w, "Tunnel closed Unexpectedly", http.StatusInternalServerError)
-		return
-	}
+	errCh := make(chan error, 1)
+
+	go func() {
+		if err := session.StreamRequestToAgent(r, requestId); err != nil {
+			errCh <- err
+		}
+	}()
+
+	defer func() {
+		session.PendingMu.Lock()
+		responseStream, exists := session.Pending[requestId]
+		if exists {
+			delete(session.Pending, requestId)
+		}
+		session.PendingMu.Unlock()
+
+		if exists {
+			responseStream.PipeWriter.Close()
+		}
+	}()
 
 	select {
-	case resp := <-respChan:
-		for key, values := range resp.Headers {
+	case responseStart := <-responseStream.responseStart:
+		for key, values := range responseStart.Headers {
 			for _, value := range values {
 				w.Header().Add(key, value)
 			}
 		}
-		w.WriteHeader(resp.Status)
-		w.Write([]byte(resp.Body))
+		w.WriteHeader(responseStart.StatusCode)
+		io.Copy(w, responseStream.PipeReader)
 
-	case <-closed:
+	case <-r.Context().Done():
+		return
+
+	case err := <-errCh:
+		log.Error("Error streaming request to agent", "error", err)
+		http.Error(w, "Error processing request.", http.StatusInternalServerError)
+		return
+
+	case <-session.currentState().closed:
 		http.Error(w, "Tunnel closed Unexpectedly", http.StatusInternalServerError)
+		return
 
 	case <-time.After(time.Duration(30 * time.Second)):
 		http.Error(w, "Timeout.", http.StatusRequestTimeout)
+		return
 	}
 }
