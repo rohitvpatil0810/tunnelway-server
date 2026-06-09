@@ -146,7 +146,9 @@ func (m *Manager) HandlePublicTunnelRequest(w http.ResponseWriter, r *http.Reque
 	errCh := make(chan error, 1)
 
 	go func() {
-		errCh <- session.StreamRequestToAgent(r, requestId)
+		if err := session.StreamRequestToAgent(r, requestId); err != nil {
+			errCh <- err
+		}
 	}()
 
 	defer func() {
