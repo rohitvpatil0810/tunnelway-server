@@ -186,7 +186,7 @@ func (m *Manager) HandlePublicTunnelRequest(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "Tunnel closed Unexpectedly", http.StatusInternalServerError)
 		return
 
-	case <-time.After(time.Duration(30 * time.Second)):
+	case <-time.After(time.Duration(60 * time.Minute)):
 		http.Error(w, "Timeout.", http.StatusRequestTimeout)
 		return
 	}
